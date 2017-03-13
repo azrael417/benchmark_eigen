@@ -42,30 +42,51 @@ subroutine distribute_matrix_scalapack(input_var, scalapack_var, GA, GZ, A, Z)
 
    !local variables
    !this assumes that all nodes get the same share, but that is right because earlier we error out if that is not the case
-   integer :: my_rank, ierror, ndim
-   integer, dimension(2) :: sizes, subsizes, starts
-   integer :: global_block_type, local_block_type
+   integer :: my_rank, num_ranks, ierror, prow, pcol, colextent, doubleextent
+   integer :: coltype, global_block_type, local_block_type
+   integer, dimension(:), allocatable :: rec_requests, snd_requests
 
    !get rank info
+   call MPI_Comm_size(MPI_COMM_WORLD, num_ranks, ierror);
    call MPI_Comm_rank(MPI_COMM_WORLD, my_rank, ierror);
 
-   !scatter the matrix. Create a vector datatype for that:
-   ndim=2
-   sizes(1)=input_var%N
-   sizes(2)=input_var%N
-   subsizes(1)=scalapack_var%rowA
-   subsizes(2)=scalapack_var%colA
-   starts=0
-   call MPI_Type_create_subarray(ndim,sizes,subsizes,starts,MPI_ORDER_FORTRAN,MPI_DOUBLE,global_block_type,ierror)
-   call MPI_Type_create_subarray(ndim,subsizes,subsizes,starts,MPI_ORDER_FORTRAN,MPI_DOUBLE,local_block_type,ierror)
+   !allocate buffers
+   allocate(rec_requests(2),snd_requests(2*num_ranks))
+
+   !create vector type for column
+   call MPI_Type_extent(MPI_DOUBLE,doubleextent,ierror)
+   call MPI_Type_vector(scalapack_var%rowA, 1, input_var%nprow, MPI_DOUBLE, coltype, ierror)
+   !we need to know the exact size of the datatype so that we can calculate the stride in the next task
+   call MPI_Type_extent(coltype,colextent,ierror)
+   colextent=colextent/doubleextent
+   !with the known vector type extent, we can now precisely compute the offsets: we do that in bytes (using hvector) to avoid fractional strides
+   call MPI_Type_hvector(scalapack_var%colA, 1, input_var%N*input_var%npcol*doubleextent, coltype, global_block_type, ierror)
+   call MPI_Type_contiguous(scalapack_var%rowA*scalapack_var%colA, MPI_DOUBLE, local_block_type, ierror)
+
+   !commit types
    call MPI_Type_commit(global_block_type,ierror)
    call MPI_Type_commit(local_block_type,ierror)
 
-   !scatter the matrix
-   call MPI_Scatter(GA,1,global_block_type,A,1,local_block_type,0,MPI_COMM_WORLD,ierror)
-   call MPI_Scatter(GZ,1,global_block_type,Z,1,local_block_type,0,MPI_COMM_WORLD,ierror)
+   !iterate over the processes and do sendrecieves:
+   !everybody receives from rank 0
+   call MPI_Irecv(A,1,local_block_type,0,0,MPI_COMM_WORLD,rec_requests(1),ierror)
+   call MPI_Irecv(Z,1,local_block_type,0,0,MPI_COMM_WORLD,rec_requests(2),ierror)
+   if(my_rank==0) then
+    do prow=1,input_var%nprow
+      do pcol=1,input_var%npcol
+        call MPI_Isend(GA(prow,pcol),1,global_block_type,(pcol-1)+input_var%npcol*(prow-1),0,MPI_COMM_WORLD,snd_requests(2*(pcol-1+input_var%npcol*(prow-1))+1),ierror)
+        call MPI_Isend(GZ(prow,pcol),1,global_block_type,(pcol-1)+input_var%npcol*(prow-1),0,MPI_COMM_WORLD,snd_requests(2*(pcol-1+input_var%npcol*(prow-1))+2),ierror)
+      end do
+    end do
+   end if
+
+   !wait for the sends to finish
+   if(my_rank==0) call MPI_Waitall(2*num_ranks,snd_requests,MPI_STATUSES_IGNORE,ierror)
+   call MPI_Waitall(2,rec_requests,MPI_STATUSES_IGNORE,ierror)
+   call MPI_Barrier(MPI_COMM_WORLD,ierror)
 
    !clean up
+   deallocate(rec_requests,snd_requests)
    call MPI_Type_free(global_block_type,ierror)
    call MPI_Type_free(local_block_type,ierror)
 

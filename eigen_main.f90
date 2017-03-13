@@ -14,6 +14,7 @@ PROGRAM eigen_main
 
    real(kind=8), allocatable :: A(:,:), Z(:,:), W(:)
    real(kind=8), allocatable :: globA(:,:), globZ(:,:)
+   integer :: i,myrank,ierror,numranks,rank
 
    type (input)     :: input_var
    type (scalapack) :: scalapack_var
@@ -35,6 +36,27 @@ PROGRAM eigen_main
          allocate( Z(scalapack_var%rowA, scalapack_var%colA) )
          !distribute matrix
          call distribute_matrix_scalapack(input_var, scalapack_var, globA, globZ, A, Z)
+
+         !print matrix
+         call MPI_Comm_size(MPI_COMM_WORLD,numranks,ierror)
+         call MPI_Comm_rank(MPI_COMM_WORLD,myrank,ierror)
+         !print matrix
+         if(myrank==0) then
+           write(*,*)"Global Matrix"
+           do i=1,input_var%N
+             write(*,'(4ES11.3)')globA(i,:)
+           enddo
+         end if
+         do rank=0, numranks-1
+           if (myrank==rank) then
+             do i=1,scalapack_var%rowA
+               write(*,'(4ES11.3)')A(i,:)
+             enddo
+           endif
+           call MPI_Barrier(MPI_COMM_WORLD,ierror)
+         enddo
+         STOP
+
          !solve
          call pdsyevd_solver(input_var%N, scalapack_var, A, Z, W)
          !gather
