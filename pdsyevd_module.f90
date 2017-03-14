@@ -113,7 +113,6 @@ subroutine pdsyevd_solver(N, scalapack_var, A, Z, W)
    integer :: my_rank, j, ierror
 
 
-
    write(6,*) "PDSYEVD -- work query start"
 
    call pdsyevd(jobz, uplo, N, A, ia, ja, scalapack_var%descA, W, Z, iz, jz, scalapack_var%descZ, temp, moneI, liwork, moneI, info);
@@ -134,7 +133,7 @@ subroutine pdsyevd_solver(N, scalapack_var, A, Z, W)
    call MPI_Comm_rank(MPI_COMM_WORLD, my_rank, ierror);
 
    if (my_rank == 0 ) then
-      do j=1, 5
+      do j=1, N
          write(6,*) "W(", j, ")=", W(j), "Z(", j, ",1)=", Z(j,1), " LWORK=", lwork, " LIWORK=", liwork
       end do
    end if

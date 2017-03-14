@@ -49,13 +49,13 @@ PROGRAM eigen_main
          end if
          do rank=0, numranks-1
            if (myrank==rank) then
+             write(*,*)"rank: ",myrank
              do i=1,scalapack_var%rowA
                write(*,'(4ES11.3)')A(i,:)
              enddo
            endif
            call MPI_Barrier(MPI_COMM_WORLD,ierror)
          enddo
-         STOP
 
          !solve
          call pdsyevd_solver(input_var%N, scalapack_var, A, Z, W)
